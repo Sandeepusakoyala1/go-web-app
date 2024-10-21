@@ -1,0 +1,105 @@
+# CICD using GitHub actions
+
+name: CI/CD
+
+# Exclude the workflow to run on changes to the helm chart
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'helm/**'
+      - 'k8s/**'
+      - 'README.md'
+
+jobs:
+
+  build:
+    # in the build we need provide a vm/ or a container where git hub actions will run this particular stage
+    # here we are saying 
+    runs-on: ubuntu-latest
+
+    steps:
+        # check out the source code
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+      # install go lang init  
+    - name: Set up Go 1.23
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.23
+
+        # run the build command 
+    - name: Build
+      run: go build -o go-web-app
+        # test the unit test cases
+    - name: Test
+      run: go test ./...
+   # stage1 is completed 
+
+   # stage 2 -- everytime we need to provide the image 
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+        # this is the default step for static code analysis for every go-lang 
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v1.56.2
+  
+  push:
+    runs-on: ubuntu-latest
+
+    needs: build
+
+    steps:
+      # search in git hub actions markets anything that u search for ex: checkout 
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+
+      # setting up the docker / install docker on the runner 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and Push action
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/go-web-app:${{github.run_id}}
+
+  update-newtag-in-helm-chart:
+    runs-on: ubuntu-latest
+
+    needs: push
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.TOKEN }}
+
+    - name: Update tag in Helm chart
+      run: |
+        sed -i 's/tag: .*/tag: "${{github.run_id}}"/' helm/go-web-app-chart/values.yaml
+
+    - name: Commit and push changes
+      run: |
+        git config --global user.email "sandeep.usakoyala1@gmail.com"
+        git config --global user.name "sandeepusakoyalaa"
+        git add helm/go-web-app-chart/values.yaml
+        git commit -m "Update tag in Helm chart"
+        git push
+
+
